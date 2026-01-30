@@ -2,7 +2,7 @@ import numpy as np
 import time
 from sklearn.metrics import roc_auc_score, precision_recall_curve, auc
 
-def evaluate_model(model, X, y, get_scores_fn):
+def evaluate_model(model, X, y, get_scores_fn, anomaly_threshold):
     """
     Evaluate isolation forest on test data.
     
@@ -26,8 +26,8 @@ def evaluate_model(model, X, y, get_scores_fn):
     precision, recall, _ = precision_recall_curve(y, scores)
     pr_auc = auc(recall, precision)
     
-    # Anomaly rate at 99th percentile threshold
-    threshold = np.percentile(scores, 99)
+    # Anomaly rate at defined percentile threshold
+    threshold = np.percentile(scores, anomaly_threshold)
     predictions = (scores > threshold).astype(int)
     anomaly_rate = predictions.mean()
     

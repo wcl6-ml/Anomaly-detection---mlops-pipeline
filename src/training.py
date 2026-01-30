@@ -40,6 +40,7 @@ def train_isolation_forest_from_config(config: dict):
     
     with mlflow.start_run(run_name=config['mlflow']['run_name']):
         # Log all model parameters
+        mlflow.set_tag("run_name", config['mlflow']['run_name'])
         mlflow.log_params({
             "model_type": config['model']['type'],
             **config['model']  # Log all model config as params
@@ -63,7 +64,7 @@ def train_isolation_forest_from_config(config: dict):
         
         # Evaluate
         print("\nEvaluating on validation set...")
-        metrics = evaluate_model(model, X_val, y_val, get_if_scores)
+        metrics = evaluate_model(model, X_val, y_val, get_if_scores, config['model']['anomaly_threshold'])
         mlflow.log_metrics(metrics)
         
         # Log model
@@ -99,6 +100,7 @@ def train_autoencoder_from_config(config: dict):
     
     with mlflow.start_run(run_name=config['mlflow']['run_name']):
         # Log parameters
+        mlflow.set_tag("run_name", config['mlflow']['run_name'])
         mlflow.log_params({
             "model_type": config['model']['type'],
             **config['model'],
@@ -130,14 +132,14 @@ def train_autoencoder_from_config(config: dict):
         
         metrics = {
             "roc_auc": roc_auc_score(y_val, scores),
-            "anomaly_rate": (scores > np.percentile(scores, 99)).mean(),
+            "anomaly_rate": (scores > np.percentile(scores, config['model']['anomaly_threshold'])).mean(),
         }
         
         precision, recall, _ = precision_recall_curve(y_val, scores)
         metrics["pr_auc"] = pr_auc(recall, precision)
         
         # Fraud detection rate
-        threshold = np.percentile(scores, 99)
+        threshold = np.percentile(scores, config['model']['anomaly_threshold'])
         predictions = (scores > threshold).astype(int)
         detected_frauds = (predictions & y_val).sum()
         total_frauds = y_val.sum()

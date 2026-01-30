@@ -3,11 +3,12 @@ model:
   n_estimators: 100
   contamination: 0.001
   random_state: 42
+  anomaly_threshold: 99.9
 
 training:
   reference_data: data/processed/reference.csv
   validation_data: data/processed/validation.csv
 
 mlflow:
-  experiment_name: fraud_detection_baseline
-  run_name: isolation_forest
+  experiment_name: fraud_detection_changeThreshold
+  run_name: isolation_forest_3
