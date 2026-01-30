@@ -51,6 +51,7 @@ def train_autoencoder(X, encoding_dim=14, epochs=50, lr=0.001, random_state=42):
     model.eval()
     return model, scaler
 
+
 def get_anomaly_scores(model, scaler, X):
     """Get reconstruction error scores."""
     X_scaled = scaler.transform(X)
