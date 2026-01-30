@@ -4,5 +4,10 @@ __pycache__/
 .venv/
 venv/
 .mlflow/
+mlflow/
+mlflow*
+mlruns*
+*.pkl
+*.pth
 data/raw/*
 data/*

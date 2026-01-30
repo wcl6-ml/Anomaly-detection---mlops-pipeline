@@ -43,4 +43,8 @@ def validate_config(config: Dict[str, Any], model_type: str):
             f"doesn't match expected '{model_type}'"
         )
     
-    print(f"✓ Config validated for {model_type}")
+    print(f"Config validated for {model_type}")
+
+
+if __name__ == "__main__":
+    pass
