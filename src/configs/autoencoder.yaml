@@ -3,7 +3,7 @@ model:
   input_dim: 29  
   encoding_dim: 14
   random_state: 42
-  anomaly_threshold: 99.9
+  anomaly_threshold: 99
 
 training:
   reference_data: data/processed/reference.csv
@@ -13,5 +13,5 @@ training:
   batch_size: 256
 
 mlflow:
-  experiment_name: fraud_detection_changeThreshold
-  run_name: autoencoder_3
+  experiment_name: fraud_detection_baseline
+  run_name: autoencoder_1

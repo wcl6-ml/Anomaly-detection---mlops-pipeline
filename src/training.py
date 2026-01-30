@@ -1,8 +1,15 @@
-# src/train.py
+import sys
+from pathlib import Path
+# Add project root to Python path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+
 import argparse
 import mlflow
 import pandas as pd
 import numpy as np
+from sklearn.metrics import precision_recall_curve, auc as pr_auc, roc_auc_score
 from pathlib import Path
 import time
 
@@ -10,7 +17,7 @@ from utils.config_model_loader import load_config, validate_config
 from models.isolation_forest import create_isolation_forest, get_anomaly_scores as get_if_scores
 from models.autoencoder import train_autoencoder, get_anomaly_scores as get_ae_scores
 from evaluation.evaluate import evaluate_model
-
+from config.mlflow_config import setup_mlflow
 
 def load_data(data_path: str):
     """Load data and separate features from labels."""
@@ -39,8 +46,9 @@ def train_isolation_forest_from_config(config: dict):
     mlflow.set_experiment(config['mlflow']['experiment_name'])
     
     with mlflow.start_run(run_name=config['mlflow']['run_name']):
-        # Log all model parameters
-        mlflow.set_tag("run_name", config['mlflow']['run_name'])
+        # Log tags and parameters
+        mlflow.set_tag("model_type", "isolation_forest")  # ADD THIS for easy filtering
+        mlflow.set_tag("model_family", "anomaly_detection") 
         mlflow.log_params({
             "model_type": config['model']['type'],
             **config['model']  # Log all model config as params
@@ -65,10 +73,18 @@ def train_isolation_forest_from_config(config: dict):
         # Evaluate
         print("\nEvaluating on validation set...")
         metrics = evaluate_model(model, X_val, y_val, get_if_scores, config['model']['anomaly_threshold'])
+        
+        # ENSURE metrics contains what you expect
+        print(f"DEBUG: Metrics calculated: {list(metrics.keys())}")  # ADD THIS for debugging
+        
         mlflow.log_metrics(metrics)
         
-        # Log model
-        mlflow.sklearn.log_model(model, "model")
+        # Log model with registered name for auto-registration
+        mlflow.sklearn.log_model(
+            model, 
+            "model",
+            registered_model_name=f"fraud-detector"  # ADD THIS
+        )
         
         # Print results
         print("\nResults:")
@@ -99,8 +115,9 @@ def train_autoencoder_from_config(config: dict):
     mlflow.set_experiment(config['mlflow']['experiment_name'])
     
     with mlflow.start_run(run_name=config['mlflow']['run_name']):
-        # Log parameters
-        mlflow.set_tag("run_name", config['mlflow']['run_name'])
+        # Log tags and parameters
+        mlflow.set_tag("model_type", "autoencoder")  # ADD THIS
+        mlflow.set_tag("model_family", "anomaly_detection")  # ADD THIS
         mlflow.log_params({
             "model_type": config['model']['type'],
             **config['model'],
@@ -127,14 +144,13 @@ def train_autoencoder_from_config(config: dict):
         print("\nEvaluating on validation set...")
         scores = get_ae_scores(model, scaler, X_val)
         
-        # Compute metrics manually for autoencoder
-        from sklearn.metrics import roc_auc_score, precision_recall_curve, auc as pr_auc
-        
+        # Compute metrics
         metrics = {
             "roc_auc": roc_auc_score(y_val, scores),
             "anomaly_rate": (scores > np.percentile(scores, config['model']['anomaly_threshold'])).mean(),
         }
         
+        # PR-AUC calculation
         precision, recall, _ = precision_recall_curve(y_val, scores)
         metrics["pr_auc"] = pr_auc(recall, precision)
         
@@ -150,12 +166,19 @@ def train_autoencoder_from_config(config: dict):
         _ = get_ae_scores(model, scaler, X_val)
         metrics["inference_time_ms"] = (time.time() - start) / len(X_val) * 1000
         
+        #ENSURE metrics are logged
+        print(f"DEBUG: Metrics calculated: {list(metrics.keys())}")  # ADD THIS
+        
         mlflow.log_metrics(metrics)
         
-        # Log model - MLFLOW.PYTORCH vs MLFLOW.SKLEARN differs 
-        mlflow.pytorch.log_model(model, "model")
+        # Log PyTorch model with registered name
+        mlflow.pytorch.log_model(
+            model, 
+            "model",
+            registered_model_name=f"fraud-detector"  # ADD THIS
+        )
         
-        # Also save scaler
+        # Save scaler
         import joblib
         scaler_path = "scaler.pkl"
         joblib.dump(scaler, scaler_path)
@@ -172,6 +195,7 @@ def train_autoencoder_from_config(config: dict):
 
 
 def main():
+    setup_mlflow()
     parser = argparse.ArgumentParser(
         description="Train fraud detection models using YAML configs"
     )
