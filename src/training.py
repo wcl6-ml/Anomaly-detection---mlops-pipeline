@@ -150,8 +150,7 @@ def train_autoencoder_from_config(config: dict):
         
         mlflow.log_metrics(metrics)
         
-        # Log model - THIS IS WHERE MLFLOW.PYTORCH vs MLFLOW.SKLEARN MATTERS
-        # We'll discuss this below
+        # Log model - MLFLOW.PYTORCH vs MLFLOW.SKLEARN differs 
         mlflow.pytorch.log_model(model, "model")
         
         # Also save scaler
