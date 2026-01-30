@@ -2,7 +2,7 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any
 
-def load_config(config_path: str) -> Dict[str, Any]:
+def load_config(config_path: str):
     """
     Load YAML configuration file.
     
@@ -22,7 +22,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
     
     return config
 
-def validate_config(config: Dict[str, Any], model_type: str) -> None:
+def validate_config(config: Dict[str, Any], model_type: str):
     """
     Validate that config has required fields.
     

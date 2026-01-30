@@ -1,7 +1,7 @@
 import pandas as pd
 from pathlib import Path
 
-def load_raw_data(filepath: Path) -> pd.DataFrame:
+def load_raw_data(filepath: Path):
     """
     Load raw credit card fraud dataset.
     
@@ -13,12 +13,12 @@ def load_raw_data(filepath: Path) -> pd.DataFrame:
     """
     df = pd.read_csv(filepath)
     
-    # Sort by time (critical for time-based split)
+    # Sort by time 
     df = df.sort_values('Time').reset_index(drop=True)
     
     return df
 
-def load_processed_data(split: str = "reference") -> pd.DataFrame:
+def load_processed_data(split: str = "reference"):
     """
     Load processed split.
     

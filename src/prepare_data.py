@@ -1,6 +1,6 @@
 from data.loader import load_raw_data
 from data.splitter import create_time_splits, save_splits
-from utils.config import (
+from utils.config_data import (
     RAW_DATA_DIR, 
     PROCESSED_DATA_DIR,
     REFERENCE_RATIO,

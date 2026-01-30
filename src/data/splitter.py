@@ -9,7 +9,7 @@ def create_time_splits(
     reference_ratio: float,
     validation_ratio: float,
     num_batches: int
-) -> Tuple[pd.DataFrame, pd.DataFrame, List[pd.DataFrame]]:
+):
     """
     Split data by time into reference, validation, and production batches.
     
@@ -71,7 +71,7 @@ def save_splits(
     
     # Save batches
     for i, batch in enumerate(batches, 1):
-        batch_filename = f"batch_{i:03d}.csv"
+        batch_filename = f"batch_{i:03}.csv"
         batch.to_csv(batch_dir / batch_filename, index=False)
     
     # Create metadata
@@ -91,7 +91,7 @@ def save_splits(
         "batches": [
             {
                 "batch_id": i,
-                "filename": f"batch_{i:03d}.csv",
+                "filename": f"batch_{i:03}.csv",
                 "size": len(batch),
                 "time_range": [float(batch['Time'].min()), float(batch['Time'].max())],
                 "fraud_count": int(batch['Class'].sum()),
