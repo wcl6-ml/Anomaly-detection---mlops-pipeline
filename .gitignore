@@ -11,3 +11,4 @@ mlruns*
 *.pth
 data/raw/*
 data/*
+archive/*

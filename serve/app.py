@@ -48,6 +48,7 @@ class PredictionRequest(BaseModel):
 
 class PredictionResponse(BaseModel):
     """Response schema for predictions."""
+    model_config = {"protected_namespaces": ()}  
     predictions: List[int]
     anomaly_scores: List[float]
     model_version: str
@@ -56,6 +57,7 @@ class PredictionResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Health check response."""
+    model_config = {"protected_namespaces": ()}
     status: str
     model_loaded: bool
     model_version: str
