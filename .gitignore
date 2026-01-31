@@ -5,8 +5,8 @@ __pycache__/
 venv/
 .mlflow/
 mlflow/
-mlflow*
 mlruns*
+*.db
 *.pkl
 *.pth
 data/raw/*
