@@ -87,8 +87,6 @@ curl -X POST http://IP_ADDRESS:8000/predict \
 
 **Example Response:**
 
-JSON
-
 ```
 {
   "predictions": [1],
@@ -96,3 +94,15 @@ JSON
   "model_version": "baked-in",
   "inference_time_ms": 9.39
 }
+
+## Current Progress & Roadmap
+
+- [x] **Phase 1-3:** Data batching, MLflow experiment tracking, and model selection.
+    
+- [x] **Phase 4:** Containerized FastAPI deployment with health checks.
+    
+- [ ] **Phase 5:** Monitoring with Prometheus & Grafana.
+
+- [ ] **Phase 6**: Simulating and tracking data drift. 
+    
+- [ ] **Phase 7:** Automated CI/CD pipelines via GitHub Actions.
