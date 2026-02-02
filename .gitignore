@@ -12,3 +12,4 @@ mlruns*
 data/raw/*
 data/*
 archive/*
+serve/model/*

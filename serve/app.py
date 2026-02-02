@@ -16,8 +16,10 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 import logging
+import yaml
 
-from config.mlflow_config import setup_mlflow
+# Define the local path where Docker will have the model
+MODEL_PATH = Path(__file__).parent / "model/artifacts"
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -66,54 +68,40 @@ class HealthResponse(BaseModel):
 
 @app.on_event("startup")
 async def load_model():
-    """Load model from MLflow registry on startup."""
+    """Load model from local folder on startup."""
     global model, model_metadata
     
     try:
-        logger.info(f"Working directory: {os.getcwd()}")
-        logger.info(f"MLflow DB exists: {Path('mlflow.db').exists()}")
+        logger.info(f"Looking for model in: {MODEL_PATH}")
         
-        # Setup MLflow
-        setup_mlflow()
+        # 1. Check if the directory exists
+        if not MODEL_PATH.exists():
+            raise FileNotFoundError(f"Model directory not found at {MODEL_PATH}")
+
+        # 2. Load the model using pyfunc from the LOCAL path
+        # MLflow knows how to read its own exported directory
+        model = mlflow.pyfunc.load_model(str(MODEL_PATH))
         
-        # Load production model
-        model_uri = "models:/fraud-detector/Production"
-        logger.info(f"Loading model from: {model_uri}")
-        
-        model = mlflow.pyfunc.load_model(model_uri)
-        
-        # Get model metadata
-        from mlflow.tracking import MlflowClient
-        client = MlflowClient()
-        
-        # Find production version
-        versions = client.search_model_versions("name='fraud-detector'")
-        prod_versions = [v for v in versions if v.current_stage == "Production"]
-        
-        if prod_versions:
-            prod_version = prod_versions[0]
-            model_metadata = {
-                "version": str(prod_version.version),  # Convert to string
-                "run_id": prod_version.run_id,
-                "created_at": prod_version.creation_timestamp
-            }
-            logger.info(f"✅ Model loaded: version {prod_version.version}")
-        else:
-            model_metadata = {"version": "unknown"}
-            logger.warning("⚠️ No production version found")
+        # 3. Extract metadata from the MLmodel file (created by MLflow during export)
+        # This allows us to still know the run_id and version without the DB!
+        mlmodel_file = MODEL_PATH / "MLmodel"
+        if mlmodel_file.exists():
+            with open(mlmodel_file, "r") as f:
+                config = yaml.safe_load(f)
+                model_metadata = {
+                    "run_id": config.get("run_id", "unknown"),
+                    "version": "baked-in", # Since it's inside the Docker image
+                    "utc_time_created": config.get("utc_time_created", "unknown")
+                }
         
         model_metadata["startup_time"] = datetime.now()
+        logger.info(f"Successfully loaded model from {MODEL_PATH}")
         
     except Exception as e:
-        logger.error(f"❌ Failed to load model: {e}")
-        import traceback
-        traceback.print_exc()
-        # Set error metadata but don't crash
-        model_metadata = {
-            "version": "error",
-            "error": str(e),
-            "startup_time": datetime.now()
-        }
+        logger.error(f"Critical error loading model: {e}")
+        # In a real production system, you might want the container to crash 
+        # (exit 1) if the model fails to load so the orchestrator (K8s) restarts it.
+        model = None
 
 
 @app.get("/")
