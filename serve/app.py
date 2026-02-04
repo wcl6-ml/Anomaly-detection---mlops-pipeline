@@ -12,6 +12,10 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import List
 import mlflow.pyfunc
+from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
+from starlette.responses import Response
+from prometheus_fastapi_instrumentator import Instrumentator
 import numpy as np
 import pandas as pd
 from datetime import datetime
@@ -31,6 +35,16 @@ app = FastAPI(
     description="Real-time anomaly detection for fraud prevention",
     version="1.0.0"
 )
+
+# For Grafana monitoring
+prediction_counter = Counter('model_predictions_total', 'Total predictions made')
+prediction_latency = Histogram('model_inference_seconds', 'Model inference latency')
+anomaly_score_gauge = Gauge('model_anomaly_score', 'Latest average anomaly score')
+feature_null_rate = Gauge('feature_null_rate', 'Null rate in input features', ['feature_index'])
+error_counter = Counter('prediction_errors_total', 'Total prediction errors', ['error_type'])
+
+# Initialize and expose /metrics endpoint
+Instrumentator().instrument(app).expose(app)
 
 # Global model variable
 model = None
@@ -156,11 +170,17 @@ async def health_check():
 async def predict(request: PredictionRequest):
     """Predict anomalies for given features."""
     if model is None:
+        error_counter.labels(error_type='model_not_loaded').inc()
         raise HTTPException(status_code=503, detail="Model not loaded")
     
     try:
         # Convert to DataFrame
         df = pd.DataFrame(request.features)
+        
+        # Track null rates per feature
+        for i in range(len(df.columns)):
+            null_rate = df.iloc[:, i].isna().sum() / len(df)
+            feature_null_rate.labels(feature_index=i).set(null_rate)
         
         logger.info(f"Received prediction request with {len(df)} samples, {len(df.columns)} features")
         
@@ -170,7 +190,10 @@ async def predict(request: PredictionRequest):
         # Get predictions
         predictions = model.predict(df)
         
-        inference_time = (datetime.now() - start_time).total_seconds() * 1000
+        inference_time = (datetime.now() - start_time).total_seconds()
+        
+        # Record latency metric
+        prediction_latency.observe(inference_time)
         
         # Convert to list
         if hasattr(predictions, 'tolist'):
@@ -189,21 +212,29 @@ async def predict(request: PredictionRequest):
             
         binary_preds = [1 if score > threshold else 0 for score in anomaly_scores]
         
-        logger.info(f"Predicted {sum(binary_preds)}/{len(binary_preds)} anomalies in {inference_time:.2f}ms")
+        # Record metrics
+        prediction_counter.inc(len(binary_preds))
+        anomaly_score_gauge.set(np.mean(anomaly_scores))
+        
+        logger.info(f"Predicted {sum(binary_preds)}/{len(binary_preds)} anomalies in {inference_time*1000:.2f}ms")
         
         return PredictionResponse(
             predictions=binary_preds,
             anomaly_scores=anomaly_scores,
             model_version=str(model_metadata.get("version", "unknown")),
-            inference_time_ms=inference_time
+            inference_time_ms=inference_time * 1000
         )
         
+    except KeyError as e:
+        error_counter.labels(error_type='missing_field').inc()
+        logger.error(f"Prediction error: {e}")
+        raise HTTPException(status_code=400, detail=f"Missing field: {str(e)}")
     except Exception as e:
+        error_counter.labels(error_type='model_error').inc()
         logger.error(f"Prediction error: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
-
 
 @app.get("/model-info")
 async def model_info():
@@ -219,6 +250,10 @@ async def model_info():
         "stage": "Production"
     }
 
+@app.get("/metrics")
+async def metrics():
+    """Prometheus metrics endpoint."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 if __name__ == "__main__":
     import uvicorn
