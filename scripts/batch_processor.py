@@ -48,12 +48,6 @@ def process_batch(batch_path: Path, batch_id: str, drift_detector: DriftDetector
     overall_psi_gauge.labels(batch_id=batch_id).set(drift_results['overall_psi'])
     drifted_features_gauge.labels(batch_id=batch_id).set(len(drift_results['drifted_features']))
     
-    # Push metrics to Prometheus (optional, if using pushgateway)
-    try:
-        push_to_gateway(PROMETHEUS_GATEWAY, job='batch_processor', registry=registry)
-    except Exception as e:
-        logger.warning(f"Could not push to Prometheus gateway: {e}")
-    
     # Make predictions via API (V1-V28 + Amount, no Time/Class)
     api_columns = [col for col in batch_df.columns if col not in ['Time', 'Class']]
     features = batch_df[api_columns].values.tolist()
