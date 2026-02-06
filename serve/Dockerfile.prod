@@ -12,8 +12,9 @@ COPY serve/requirements-serve.txt .
 RUN pip install --no-cache-dir -r requirements-serve.txt
 
 # Copy application code
-COPY config/ /app/config/
+COPY src/ /app/src/
 COPY serve/ /app/serve/
+COPY data/processed/reference.csv /app/data/processed/reference.csv
 
 # Create non-root user
 RUN useradd -m -u 1000 appuser && \

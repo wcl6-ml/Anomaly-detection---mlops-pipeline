@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from typing import List
 import mlflow.pyfunc
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Histogram, Gauge, make_asgi_app
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from starlette.responses import Response
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -21,6 +21,8 @@ import pandas as pd
 from datetime import datetime
 import logging
 import yaml
+
+from src.drift.detector import DriftDetector
 
 # Define the local path where Docker will have the model
 MODEL_PATH = Path(__file__).parent / "model/artifacts"
@@ -43,13 +45,28 @@ anomaly_score_gauge = Gauge('model_anomaly_score', 'Latest average anomaly score
 feature_null_rate = Gauge('feature_null_rate', 'Null rate in input features', ['feature_index'])
 error_counter = Counter('prediction_errors_total', 'Total prediction errors', ['error_type'])
 
-# Initialize and expose /metrics endpoint
-Instrumentator().instrument(app).expose(app)
+# Define Gauge for Prometheus
+MODEL_DRIFT_GAUGE = Gauge(
+    "model_drift_psi", 
+    "Population Stability Index for data drift",
+    ["feature"]
+)
+
+# Initialize Instrumentator but DON'T expose yet
+instrumentator = Instrumentator().instrument(app)
+
+# Create the Prometheus ASGI app
+metrics_app = make_asgi_app()
+
+# Mount it to the /metrics path
+app.mount("/metrics", metrics_app)
 
 # Global model variable
 model = None
 model_metadata = {}
 
+# For drift detection
+drift_detector = None  
 
 class PredictionRequest(BaseModel):
     """Request schema for predictions."""
@@ -110,7 +127,16 @@ async def load_model():
         
         model_metadata["startup_time"] = datetime.now()
         logger.info(f"Successfully loaded model from {MODEL_PATH}")
-        
+
+        # Load reference data for drift detection
+        ref_path = project_root / "data/processed/reference.csv"
+        if ref_path.exists():
+            reference_df = pd.read_csv(ref_path)
+            drift_detector = DriftDetector(reference_df)
+            logger.info("Drift detector initialized with reference data.")
+        else:
+            logger.warning(f"Reference data not found at {ref_path}. Drift detection disabled.")
+
     except Exception as e:
         logger.error(f"Critical error loading model: {e}")
         # In a real production system, you might want the container to crash 
@@ -177,6 +203,15 @@ async def predict(request: PredictionRequest):
         # Convert to DataFrame
         df = pd.DataFrame(request.features)
         
+        # Drift detection
+        if drift_detector is not None:
+            drift_results = drift_detector.detect_drift(df)
+            MODEL_DRIFT_GAUGE.labels(feature="overall").set(drift_results['overall_psi'])
+            
+            # Optional: Log if drift is detected
+            if drift_results['drift_detected']:
+                logger.warning(f"Data drift detected! Overall PSI: {drift_results['overall_psi']:.4f}")
+
         # Track null rates per feature
         for i in range(len(df.columns)):
             null_rate = df.iloc[:, i].isna().sum() / len(df)

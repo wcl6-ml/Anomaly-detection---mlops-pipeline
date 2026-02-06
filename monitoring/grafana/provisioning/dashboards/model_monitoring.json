@@ -257,7 +257,51 @@
       ],
       "title": "Prediction Rate",
       "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "PBFA97CFB590B2093"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "showPoints": "always"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 0.1 },
+              { "color": "red", "value": 0.2 }
+            ]
+          },
+          "unit": "none"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
+      "id": 4,
+      "targets": [
+        {
+          "expr": "model_drift_psi{feature=\"overall\"}",
+          "legendFormat": "Overall PSI (Drift)",
+          "refId": "A"
+        }
+      ],
+      "title": "Model Data Drift (PSI)",
+      "type": "timeseries"
     }
+  
   ],
   "schemaVersion": 42,
   "tags": ["mlops", "model-monitoring"],

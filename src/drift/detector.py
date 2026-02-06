@@ -25,27 +25,43 @@ class DriftDetector:
         self.feature_names = reference_data.columns.tolist()
         
     def calculate_psi(self, expected: np.ndarray, actual: np.ndarray, 
-                     buckets: int = 10) -> float:
-        """Calculate Population Stability Index."""
-        def scale_range(x):
-            return (x - x.min()) / (x.max() - x.min() + 1e-10)
+                    buckets: int = 10) -> float:
+        """
+        Calculate Population Stability Index using reference-based binning.
         
-        expected_scaled = scale_range(expected)
-        actual_scaled = scale_range(actual)
+        Args:
+            expected: The reference/training data for a feature.
+            actual: The new/production data for a feature.
+            buckets: Number of bins to create.
+        """
+        # 1. Define bins based on the distribution of the EXPECTED (reference) data
+        # We use quantiles to ensure each bin in 'expected' has ~10% of the data
+        breakpoints = np.percentile(expected, np.arange(0, 100 + 100/buckets, 100/buckets))
         
-        breakpoints = np.linspace(0, 1, buckets + 1)
-        
-        expected_percents = np.histogram(expected_scaled, breakpoints)[0] / len(expected)
-        actual_percents = np.histogram(actual_scaled, breakpoints)[0] / len(actual)
-        
-        # Avoid division by zero
+        # Handle non-unique breakpoints (common in features with many zeros)
+        breakpoints = np.unique(breakpoints)
+        if len(breakpoints) < 2:
+            # If the feature has no variance, PSI isn't meaningful
+            return 0.0
+
+        # 2. Categorize data into these fixed bins
+        # np.histogram uses the reference breakpoints for both datasets
+        expected_counts = np.histogram(expected, bins=breakpoints)[0]
+        actual_counts = np.histogram(actual, bins=breakpoints)[0]
+
+        # 3. Convert to percentages (proportions)
+        expected_percents = expected_counts / len(expected)
+        actual_percents = actual_counts / len(actual)
+
+        # 4. Handle zeros to avoid infinity in log (Smoothing)
+        # Using 1e-4 is a standard practice in PSI calculation
         expected_percents = np.where(expected_percents == 0, 0.0001, expected_percents)
         actual_percents = np.where(actual_percents == 0, 0.0001, actual_percents)
-        
-        psi = np.sum((actual_percents - expected_percents) * 
-                     np.log(actual_percents / expected_percents))
-        
-        return psi
+
+        # 5. Calculate PSI formula: (Actual% - Expected%) * ln(Actual% / Expected%)
+        psi_value = np.sum((actual_percents - expected_percents) * np.log(actual_percents / expected_percents))
+
+        return float(psi_value)
     
     def detect_drift(self, batch_data: pd.DataFrame) -> Dict[str, any]:
         """
