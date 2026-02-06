@@ -218,6 +218,7 @@ async def health_check():
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(request: PredictionRequest):
+    """Predict anomalies for given features."""
     if model is None:
         error_counter.labels(error_type='model_not_loaded').inc()
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -226,55 +227,64 @@ async def predict(request: PredictionRequest):
         # Convert to DataFrame
         df = pd.DataFrame(request.features)
         
-        # Ensure we have column names for the drift detector if it expects them
-        # If your detector uses index-based slicing, this is fine
-        if drift_detector is not None:
-            drift_feature_count = len(drift_detector.feature_names)
-            drift_df = df.iloc[:, :drift_feature_count]
-            # Rename columns to match what the detector was initialized with
-            drift_df.columns = drift_detector.feature_names
-            
-            drift_results = drift_detector.detect_drift(drift_df)
-            MODEL_DRIFT_GAUGE.labels(feature="overall").set(float(drift_results['overall_psi']))
-
-        # Track null rates - ENSURE float conversion for Prometheus
+        # Track null rates per feature
         for i in range(len(df.columns)):
-            null_count = int(df.iloc[:, i].isna().sum())
-            rate = float(null_count / len(df))
-            feature_null_rate.labels(feature_index=str(i)).set(rate)
+            null_rate = df.iloc[:, i].isna().sum() / len(df)
+            feature_null_rate.labels(feature_index=i).set(null_rate)
         
-        # Inference
+        logger.info(f"Received prediction request with {len(df)} samples, {len(df.columns)} features")
+        
+        # Time the inference
         start_time = datetime.now()
+        
+        # Get predictions
         predictions = model.predict(df)
+        
         inference_time = (datetime.now() - start_time).total_seconds()
         
-        # Convert results to standard Python types to satisfy Pydantic/JSON
-        if hasattr(predictions, 'tolist'):
-            pred_list = [int(x) for x in predictions.tolist()]
-        else:
-            pred_list = [int(x) for x in predictions]
+        # Record latency metric
+        prediction_latency.observe(inference_time)
         
-        # isolation forest anomaly scores (convert to float)
+        # Convert to list
+        if hasattr(predictions, 'tolist'):
+            pred_list = predictions.tolist()
+        else:
+            pred_list = list(predictions)
+        
+        # For isolation forest, scores are negative (more negative = more anomalous)
         anomaly_scores = [abs(float(p)) for p in pred_list]
         
-        # Binary preds (ensure native int)
+        # Binary predictions (1 = anomaly)
         if len(anomaly_scores) > 1:
-            threshold = float(np.percentile(anomaly_scores, 90))
+            threshold = np.percentile(anomaly_scores, 90)
         else:
             threshold = 0.0
             
-        binary_preds = [1 if float(score) > threshold else 0 for score in anomaly_scores]
+        binary_preds = [1 if score > threshold else 0 for score in anomaly_scores]
         
-        # Update metrics with native floats
+        # Record metrics
         prediction_counter.inc(len(binary_preds))
-        anomaly_score_gauge.set(float(np.mean(anomaly_scores)))
+        anomaly_score_gauge.set(np.mean(anomaly_scores))
+        
+        logger.info(f"Predicted {sum(binary_preds)}/{len(binary_preds)} anomalies in {inference_time*1000:.2f}ms")
         
         return PredictionResponse(
             predictions=binary_preds,
             anomaly_scores=anomaly_scores,
             model_version=str(model_metadata.get("version", "unknown")),
-            inference_time_ms=float(inference_time * 1000)
+            inference_time_ms=inference_time * 1000
         )
+        
+    except KeyError as e:
+        error_counter.labels(error_type='missing_field').inc()
+        logger.error(f"Prediction error: {e}")
+        raise HTTPException(status_code=400, detail=f"Missing field: {str(e)}")
+    except Exception as e:
+        error_counter.labels(error_type='model_error').inc()
+        logger.error(f"Prediction error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
         
 @app.get("/model-info")
 async def model_info():
