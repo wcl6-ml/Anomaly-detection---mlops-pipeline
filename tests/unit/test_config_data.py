@@ -1,5 +1,5 @@
 """Essential tests for data configuration constants."""
-
+import pytest
 from pathlib import Path
 from src.utils.config_data import (
     PROJECT_ROOT,

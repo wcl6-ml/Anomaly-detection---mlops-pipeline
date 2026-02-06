@@ -13,3 +13,4 @@ data/raw/*
 data/*
 archive/*
 serve/model/*
+.coverage*

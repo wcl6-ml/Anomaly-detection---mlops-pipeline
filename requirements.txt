@@ -7,4 +7,4 @@ uvicorn
 evidently
 prometheus-client
 prometheus-fastapi-instrumentator
-
+pytest

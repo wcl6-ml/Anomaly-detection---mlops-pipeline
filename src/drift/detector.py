@@ -81,7 +81,7 @@ class DriftDetector:
                 'ks_statistic': float(ks_stat),
                 'ks_pvalue': float(p_value),
                 'psi': float(psi),
-                'drift': drift
+                'drift': bool(drift)
             }
             
             if drift:
