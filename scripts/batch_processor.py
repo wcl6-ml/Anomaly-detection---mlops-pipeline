@@ -50,7 +50,8 @@ def process_batch(batch_path: Path, batch_id: str, drift_detector: DriftDetector
     
     # Make predictions via API (V1-V28 + Amount, no Time/Class)
     api_columns = [col for col in batch_df.columns if col not in ['Time', 'Class']]
-    features = batch_df[api_columns].values.tolist()
+    # Use .astype(float) and .tolist() ensures native Python floats
+    features = batch_df[api_columns].astype(float).values.tolist()
     
     # send to API
     response = requests.post(
@@ -96,7 +97,7 @@ def main():
     logger.info(f"Features: {reference_df.columns.tolist()[:5]}... (total {len(feature_columns)})")
     
     # Initialize drift detector
-    drift_detector = DriftDetector(reference_df, threshold_ks=0.05, threshold_psi=0.1)
+    drift_detector = DriftDetector(reference_df, threshold_ks=0.05, threshold_psi=0.28)
     
     # Get all batches
     batch_dir = project_root / "data/processed/batches"

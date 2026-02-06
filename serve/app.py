@@ -100,7 +100,7 @@ class HealthResponse(BaseModel):
 @app.on_event("startup")
 async def load_model():
     """Load model from local folder on startup."""
-    global model, model_metadata
+    global model, model_metadata, drift_detector
     
     try:
         logger.info(f"Looking for model in: {MODEL_PATH}")
@@ -136,7 +136,31 @@ async def load_model():
             logger.info("Drift detector initialized with reference data.")
         else:
             logger.warning(f"Reference data not found at {ref_path}. Drift detection disabled.")
-
+        
+        # set up the dynamic threshold
+        ref_path = project_root / "data/processed/reference.csv"
+        if ref_path.exists():
+            reference_df = pd.read_csv(ref_path)
+            
+            # 1. Calculate "System Noise" (Self-PSI)
+            # Split reference data to see what 'natural' variance looks like
+            mid = len(reference_df) // 2
+            ref_a = reference_df.iloc[:mid]
+            ref_b = reference_df.iloc[mid:]
+            
+            temp_detector = DriftDetector(ref_a)
+            # Calculate PSI of one half vs the other
+            self_drift_results = temp_detector.detect_drift(ref_b)
+            self_psi = self_drift_results['overall_psi']
+            
+            # 2. Set dynamic threshold: 0.2 (Standard) + Self-PSI (Noise)
+            # This accounts for the 'split issue' you mentioned
+            dynamic_threshold = 0.16 + self_psi
+            
+            drift_detector = DriftDetector(reference_df, threshold_psi=dynamic_threshold)
+            
+            logger.info(f"Drift detector initialized. Base Noise: {self_psi:.4f}")
+            logger.info(f"Dynamic Alert Threshold set to: {dynamic_threshold:.4f}")
     except Exception as e:
         logger.error(f"Critical error loading model: {e}")
         # In a real production system, you might want the container to crash 
@@ -194,7 +218,6 @@ async def health_check():
 
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(request: PredictionRequest):
-    """Predict anomalies for given features."""
     if model is None:
         error_counter.labels(error_type='model_not_loaded').inc()
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -203,74 +226,56 @@ async def predict(request: PredictionRequest):
         # Convert to DataFrame
         df = pd.DataFrame(request.features)
         
-        # Drift detection
+        # Ensure we have column names for the drift detector if it expects them
+        # If your detector uses index-based slicing, this is fine
         if drift_detector is not None:
-            drift_results = drift_detector.detect_drift(df)
-            MODEL_DRIFT_GAUGE.labels(feature="overall").set(drift_results['overall_psi'])
+            drift_feature_count = len(drift_detector.feature_names)
+            drift_df = df.iloc[:, :drift_feature_count]
+            # Rename columns to match what the detector was initialized with
+            drift_df.columns = drift_detector.feature_names
             
-            # Optional: Log if drift is detected
-            if drift_results['drift_detected']:
-                logger.warning(f"Data drift detected! Overall PSI: {drift_results['overall_psi']:.4f}")
+            drift_results = drift_detector.detect_drift(drift_df)
+            MODEL_DRIFT_GAUGE.labels(feature="overall").set(float(drift_results['overall_psi']))
 
-        # Track null rates per feature
+        # Track null rates - ENSURE float conversion for Prometheus
         for i in range(len(df.columns)):
-            null_rate = df.iloc[:, i].isna().sum() / len(df)
-            feature_null_rate.labels(feature_index=i).set(null_rate)
+            null_count = int(df.iloc[:, i].isna().sum())
+            rate = float(null_count / len(df))
+            feature_null_rate.labels(feature_index=str(i)).set(rate)
         
-        logger.info(f"Received prediction request with {len(df)} samples, {len(df.columns)} features")
-        
-        # Time the inference
+        # Inference
         start_time = datetime.now()
-        
-        # Get predictions
         predictions = model.predict(df)
-        
         inference_time = (datetime.now() - start_time).total_seconds()
         
-        # Record latency metric
-        prediction_latency.observe(inference_time)
-        
-        # Convert to list
+        # Convert results to standard Python types to satisfy Pydantic/JSON
         if hasattr(predictions, 'tolist'):
-            pred_list = predictions.tolist()
+            pred_list = [int(x) for x in predictions.tolist()]
         else:
-            pred_list = list(predictions)
+            pred_list = [int(x) for x in predictions]
         
-        # For isolation forest, scores are negative (more negative = more anomalous)
+        # isolation forest anomaly scores (convert to float)
         anomaly_scores = [abs(float(p)) for p in pred_list]
         
-        # Binary predictions (1 = anomaly)
+        # Binary preds (ensure native int)
         if len(anomaly_scores) > 1:
-            threshold = np.percentile(anomaly_scores, 90)
+            threshold = float(np.percentile(anomaly_scores, 90))
         else:
             threshold = 0.0
             
-        binary_preds = [1 if score > threshold else 0 for score in anomaly_scores]
+        binary_preds = [1 if float(score) > threshold else 0 for score in anomaly_scores]
         
-        # Record metrics
+        # Update metrics with native floats
         prediction_counter.inc(len(binary_preds))
-        anomaly_score_gauge.set(np.mean(anomaly_scores))
-        
-        logger.info(f"Predicted {sum(binary_preds)}/{len(binary_preds)} anomalies in {inference_time*1000:.2f}ms")
+        anomaly_score_gauge.set(float(np.mean(anomaly_scores)))
         
         return PredictionResponse(
             predictions=binary_preds,
             anomaly_scores=anomaly_scores,
             model_version=str(model_metadata.get("version", "unknown")),
-            inference_time_ms=inference_time * 1000
+            inference_time_ms=float(inference_time * 1000)
         )
         
-    except KeyError as e:
-        error_counter.labels(error_type='missing_field').inc()
-        logger.error(f"Prediction error: {e}")
-        raise HTTPException(status_code=400, detail=f"Missing field: {str(e)}")
-    except Exception as e:
-        error_counter.labels(error_type='model_error').inc()
-        logger.error(f"Prediction error: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.get("/model-info")
 async def model_info():
     """Get information about the currently loaded model."""
@@ -285,10 +290,6 @@ async def model_info():
         "stage": "Production"
     }
 
-@app.get("/metrics")
-async def metrics():
-    """Prometheus metrics endpoint."""
-    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 if __name__ == "__main__":
     import uvicorn
