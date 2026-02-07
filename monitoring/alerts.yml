@@ -3,16 +3,16 @@ groups:
     interval: 30s
     rules:
       - alert: HighDataDrift
-        expr: model_drift_psi{feature="overall"} > 0.2
+        expr: model_drift_psi{feature="overall"} > 0.28
         for: 1m
         labels:
           severity: warning
         annotations:
           summary: "Data drift detected"
-          description: "Overall PSI is {{ $value }}, threshold is 0.2"
+          description: "Overall PSI is {{ $value }}, threshold is 0.28"
       
       - alert: CriticalDataDrift
-        expr: model_drift_psi{feature="overall"} > 0.3
+        expr: model_drift_psi{feature="overall"} > 0.35
         for: 30s
         labels:
           severity: critical
