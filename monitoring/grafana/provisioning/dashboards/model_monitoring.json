@@ -296,6 +296,11 @@
           "expr": "model_drift_psi{feature=\"overall\"}",
           "legendFormat": "Overall PSI (Drift)",
           "refId": "A"
+        },
+        {
+          "expr": "vector(0.28)",
+          "legendFormat": "Alert Threshold",
+          "refId": "B"
         }
       ],
       "title": "Model Data Drift (PSI)",

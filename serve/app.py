@@ -108,65 +108,56 @@ async def load_model():
         # 1. Check if the directory exists
         if not MODEL_PATH.exists():
             raise FileNotFoundError(f"Model directory not found at {MODEL_PATH}")
-
+        
         # 2. Load the model using pyfunc from the LOCAL path
-        # MLflow knows how to read its own exported directory
         model = mlflow.pyfunc.load_model(str(MODEL_PATH))
         
-        # 3. Extract metadata from the MLmodel file (created by MLflow during export)
-        # This allows us to still know the run_id and version without the DB!
+        # 3. Extract metadata from the MLmodel file
         mlmodel_file = MODEL_PATH / "MLmodel"
         if mlmodel_file.exists():
             with open(mlmodel_file, "r") as f:
                 config = yaml.safe_load(f)
                 model_metadata = {
                     "run_id": config.get("run_id", "unknown"),
-                    "version": "baked-in", # Since it's inside the Docker image
+                    "version": "baked-in",
                     "utc_time_created": config.get("utc_time_created", "unknown")
                 }
         
         model_metadata["startup_time"] = datetime.now()
         logger.info(f"Successfully loaded model from {MODEL_PATH}")
-
-        # Load reference data for drift detection
-        ref_path = project_root / "data/processed/reference.csv"
-        if ref_path.exists():
-            reference_df = pd.read_csv(ref_path)
-            drift_detector = DriftDetector(reference_df)
-            logger.info("Drift detector initialized with reference data.")
-        else:
-            logger.warning(f"Reference data not found at {ref_path}. Drift detection disabled.")
         
-        # set up the dynamic threshold
+        # 4. Load reference data for drift detection
         ref_path = project_root / "data/processed/reference.csv"
-        if ref_path.exists():
-            reference_df = pd.read_csv(ref_path)
-            
-            # 1. Calculate "System Noise" (Self-PSI)
-            # Split reference data to see what 'natural' variance looks like
-            mid = len(reference_df) // 2
-            ref_a = reference_df.iloc[:mid]
-            ref_b = reference_df.iloc[mid:]
-            
-            temp_detector = DriftDetector(ref_a)
-            # Calculate PSI of one half vs the other
-            self_drift_results = temp_detector.detect_drift(ref_b)
-            self_psi = self_drift_results['overall_psi']
-            
-            # 2. Set dynamic threshold: 0.2 (Standard) + Self-PSI (Noise)
-            # This accounts for the 'split issue' you mentioned
-            dynamic_threshold = 0.16 + self_psi
-            
-            drift_detector = DriftDetector(reference_df, threshold_psi=dynamic_threshold)
-            
-            logger.info(f"Drift detector initialized. Base Noise: {self_psi:.4f}")
-            logger.info(f"Dynamic Alert Threshold set to: {dynamic_threshold:.4f}")
+        if not ref_path.exists():
+            logger.warning(f"Reference data not found at {ref_path}. Drift detection disabled.")
+            return
+        
+        reference_df = pd.read_csv(ref_path)
+        
+        # Drop columns not used in prediction
+        cols_to_drop = ['Time', 'Class']
+        reference_df = reference_df.drop(columns=cols_to_drop, errors='ignore')
+        
+        # 5. Calculate "System Noise" (Self-PSI)
+        mid = len(reference_df) // 2
+        ref_a = reference_df.iloc[:mid]
+        ref_b = reference_df.iloc[mid:]
+        
+        temp_detector = DriftDetector(ref_a)
+        self_drift_results = temp_detector.detect_drift(ref_b)
+        self_psi = self_drift_results['overall_psi']
+        
+        # 6. Set dynamic threshold
+        dynamic_threshold = 0.28  # ← Change the threshold for alerting here
+        
+        drift_detector = DriftDetector(reference_df, threshold_psi=dynamic_threshold)
+        
+        logger.info(f"Drift detector initialized. Base Noise: {self_psi:.4f}")
+        logger.info(f"Dynamic Alert Threshold set to: {dynamic_threshold:.4f}")
+        
     except Exception as e:
         logger.error(f"Critical error loading model: {e}")
-        # In a real production system, you might want the container to crash 
-        # (exit 1) if the model fails to load so the orchestrator (K8s) restarts it.
         model = None
-
 
 @app.get("/")
 async def root():
@@ -224,8 +215,11 @@ async def predict(request: PredictionRequest):
         raise HTTPException(status_code=503, detail="Model not loaded")
     
     try:
-        # Convert to DataFrame
-        df = pd.DataFrame(request.features)
+        # Convert to DataFrame WITH COLUMN NAMES
+        if drift_detector is not None:
+            df = pd.DataFrame(request.features, columns=drift_detector.feature_names)
+        else:
+            df = pd.DataFrame(request.features)
         
         # Track null rates per feature
         for i in range(len(df.columns)):
@@ -265,6 +259,22 @@ async def predict(request: PredictionRequest):
         # Record metrics
         prediction_counter.inc(len(binary_preds))
         anomaly_score_gauge.set(np.mean(anomaly_scores))
+                # AFTER the predictions, ADD DRIFT DETECTION:
+        if drift_detector is not None:
+            try:
+                drift_results = drift_detector.detect_drift(df)
+                
+                # Emit overall PSI
+                MODEL_DRIFT_GAUGE.labels(feature="overall").set(drift_results['overall_psi'])
+                
+                # Optionally emit per-feature PSI (for detailed monitoring)
+                for feature, metrics in drift_results['feature_drifts'].items():
+                    MODEL_DRIFT_GAUGE.labels(feature=feature).set(metrics['psi'])
+                
+                if drift_results['drift_detected']:
+                    logger.warning(f"DRIFT ALERT: Overall PSI={drift_results['overall_psi']:.4f}")
+            except Exception as e:
+                logger.error(f"Drift detection failed: {e}")
         
         logger.info(f"Predicted {sum(binary_preds)}/{len(binary_preds)} anomalies in {inference_time*1000:.2f}ms")
         
