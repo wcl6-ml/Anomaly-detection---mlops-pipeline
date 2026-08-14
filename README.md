@@ -2,7 +2,7 @@
 
 An end-to-end MLOps system built to explore experiment tracking, model serving, drift detection, and observability infrastructure.
 
-**Project Focus:** This project represents my foundational hands-on exploration transitioning from academic PhD research into MLOps and DevOps engineering. Rather than focusing on offline model tuning, the goal was to build a complete end-to-end operational workflow—connecting FastAPI serving, PostgreSQL prediction logging, Population Stability Index (PSI) drift detection, and Prometheus/Grafana monitoring in a containerized environment.
+**Project Focus:** This project represents my foundational hands-on exploration transitioning from academic PhD research into MLOps and DevOps engineering. Rather than focusing on offline model tuning, the goal was to build a complete end-to-end operational workflow, connecting FastAPI serving, PostgreSQL prediction logging, Population Stability Index (PSI) drift detection, and Prometheus/Grafana monitoring in a containerized environment.
 
 ## Key Capabilities Implemented
 
