@@ -168,12 +168,18 @@ JSON
 
 ## Monitoring, Drift & Database Queries
 
-### Metrics Tracked
 
+### Metrics Tracked
 - **Model Behavior:** Anomaly rate over time, PSI data drift score.
-    
 - **System Health:** Inference latency (p50/p95), error counts, feature null rates.
-    
+
+![Grafana Monitoring Dashboard](images/Grafana_monitor.jpg)
+
+### Alerting & Drift Rules
+- **Drift Threshold:** Triggers when Population Stability Index (PSI) exceeds `0.28`.
+
+![Prometheus Alerts](images/Prometheus_alerts.jpg)
+
 
 ### Backtracking & Audit Logs via PostgreSQL
 
